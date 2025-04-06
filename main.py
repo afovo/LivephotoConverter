@@ -14,6 +14,7 @@ import ctypes
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import queue
 import multiprocessing
+import json
 
 # 尝试导入HEIC支持
 try:
@@ -51,6 +52,7 @@ class LivePhotoBackupTool:
         self.output_format = tk.StringVar(value="mp4")
         self.preserve_metadata = tk.BooleanVar(value=True)
         self.preserve_structure = tk.BooleanVar(value=True)
+        self.preserve_livp = tk.BooleanVar(value=False)
         self.thread_count = tk.IntVar(value=multiprocessing.cpu_count())
         self.use_gpu = tk.BooleanVar(value=False)
         
@@ -271,23 +273,19 @@ class LivePhotoBackupTool:
         
         ttk.Label(format_frame, text="LivePhoto输出格式:").pack(anchor=tk.W, pady=(0, 5))
         format_combo = ttk.Combobox(format_frame, textvariable=self.output_format, 
-                                   values=["original", "mp4", "gif", "jpg"], 
-                                   state="readonly", width=15)
+                                values=["original", "mp4", "gif", "jpg"], 
+                                state="readonly", width=15)
         format_combo.pack(anchor=tk.W)
         format_combo.current(1)  # 默认选择mp4
+        
+        # 添加LIVP保留选项
+        livp_check = ttk.Checkbutton(format_frame, text="保留LIVP文件", 
+                                variable=self.preserve_livp)
+        livp_check.pack(anchor=tk.W, pady=(5, 0))
         
         # 保留选项
         preserve_frame = ttk.Frame(options_content)
         preserve_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 10))
-        
-        ttk.Label(preserve_frame, text="保留选项:").pack(anchor=tk.W, pady=(0, 5))
-        preserve_meta_check = ttk.Checkbutton(preserve_frame, text="保留元数据", 
-                                             variable=self.preserve_metadata)
-        preserve_meta_check.pack(anchor=tk.W)
-        
-        preserve_struct_check = ttk.Checkbutton(preserve_frame, text="保留目录结构", 
-                                               variable=self.preserve_structure)
-        preserve_struct_check.pack(anchor=tk.W)
         
         # 性能设置
         perf_frame = ttk.Frame(options_content)
@@ -1303,8 +1301,14 @@ class LivePhotoBackupTool:
         """处理单个Live Photo"""
         try:
             output_format = self.output_format.get()
+            preserve_livp = self.preserve_livp.get()
             filename = os.path.basename(image_file)
             name_no_ext = os.path.splitext(filename)[0]
+            
+            # 如果需要保留/创建LIVP文件
+            if preserve_livp:
+                livp_file = os.path.join(target_dir, f"{name_no_ext}.livp")
+                self.create_livp_file(image_file, video_file, livp_file)
             
             if output_format == "original":
                 # 仅复制原始文件
@@ -1341,6 +1345,53 @@ class LivePhotoBackupTool:
         
         except Exception as e:
             self.log(f"处理 Live Photo 时出错: {str(e)}")
+            return False
+
+    def create_livp_file(self, image_file, video_file, output_livp):
+        """从图片和视频创建LIVP文件"""
+        try:
+            # 创建临时目录
+            temp_dir = tempfile.mkdtemp(prefix="create_livp_")
+            
+            try:
+                # 准备LIVP所需文件
+                image_filename = os.path.basename(image_file)
+                video_filename = os.path.basename(video_file)
+                
+                # 创建metadata.json文件（简化版）
+                metadata = {
+                    "version": "1.0",
+                    "photoFile": image_filename,
+                    "videoFile": video_filename,
+                    "creationDate": time.strftime("%Y-%m-%dT%H:%M:%SZ")
+                }
+                
+                metadata_path = os.path.join(temp_dir, "metadata.json")
+                with open(metadata_path, 'w') as f:
+                    json.dump(metadata, f)
+                
+                # 复制图片和视频到临时目录
+                temp_image = os.path.join(temp_dir, image_filename)
+                temp_video = os.path.join(temp_dir, video_filename)
+                
+                shutil.copy2(image_file, temp_image)
+                shutil.copy2(video_file, temp_video)
+                
+                # 创建ZIP文件（LIVP实际上是ZIP格式）
+                with zipfile.ZipFile(output_livp, 'w') as zipf:
+                    zipf.write(metadata_path, "metadata.json")
+                    zipf.write(temp_image, image_filename)
+                    zipf.write(temp_video, video_filename)
+                
+                self.log(f"已创建LIVP文件: {os.path.basename(output_livp)}")
+                return True
+                
+            finally:
+                # 清理临时目录
+                shutil.rmtree(temp_dir, ignore_errors=True)
+        
+        except Exception as e:
+            self.log(f"创建LIVP文件时出错: {str(e)}")
             return False
     
     def process_livp_file(self, livp_path, target_dir):
