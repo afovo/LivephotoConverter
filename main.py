@@ -1736,7 +1736,7 @@ def main():
     try:
         # 尝试设置窗口图标（如果有）
         if sys.platform == "win32":
-            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
+            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dependencies/logo.ico")
             if os.path.exists(icon_path):
                 root.iconbitmap(icon_path)
     except:
